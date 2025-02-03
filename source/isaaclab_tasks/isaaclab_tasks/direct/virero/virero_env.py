@@ -24,8 +24,8 @@ from omni.isaac.lab.utils.math import sample_uniform
 
 
 @configclass
-class FrankaCabinetEnvCfg(DirectRLEnvCfg):
-    ############# to edit
+class VireroSia20fEnvCfg(DirectRLEnvCfg):
+    ############# todo: to edit
     # env
     episode_length_s = 8.3333  # 500 timesteps
     decimation = 2
@@ -54,7 +54,8 @@ class FrankaCabinetEnvCfg(DirectRLEnvCfg):
     
     # virero_env
     
-    # check if articulation cfg is correct?? since the root joint is not directly an articulation of the top parent.
+    # todo: check if articulation cfg is correct?? since the root joint is not directly an articulation of the top parent.
+    # todo later: try removing the articulation root from the root joint, it behaves well in the virero_ros file when added as reference.
     virero = ArticulationCfg(
         prim_path="/World/envs/env_.*/virero",
         spawn=sim_utils.UsdFileCfg(
@@ -72,7 +73,7 @@ class FrankaCabinetEnvCfg(DirectRLEnvCfg):
         #         "drawer_top_joint": 0.0,
         #     },
         # ),
-        ####### Check if actuators are really required?? if 
+        ####### todo: Check if actuators are really required?? if 
         # actuators={
         #     "drawers": ImplicitActuatorCfg(
         #         joint_names_expr=["drawer_top_joint", "drawer_bottom_joint"],
@@ -94,6 +95,7 @@ class FrankaCabinetEnvCfg(DirectRLEnvCfg):
     # sia20f : configuring it as an articulation, but already spawned beforehand in the virero setup.
     sia20f = ArticulationCfg(
         prim_path="/World/envs/env_.*/virero/sia20f",
+        # todo: check if it works without spawn
         # spawn=sim_utils.UsdFileCfg(
         #     usd_path=f"{ISAAC_NUCLEUS_DIR}/Robots/Franka/franka_instanceable.usd",
         #     activate_contact_sensors=False,
@@ -133,7 +135,7 @@ class FrankaCabinetEnvCfg(DirectRLEnvCfg):
                     "sia20f_joint_6_b",
                     "sia20f_joint_7_t",
                 ],
-                ## to check if the values need to be changed???
+                ## todo: to check if the values need to be changed???
                 effort_limit=None,
                 velocity_limit=None,
                 stiffness=None,
@@ -156,6 +158,7 @@ class FrankaCabinetEnvCfg(DirectRLEnvCfg):
         },
     )
 
+    # todo: check ground plane values later
     # ground plane
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
@@ -170,6 +173,7 @@ class FrankaCabinetEnvCfg(DirectRLEnvCfg):
         ),
     )
 
+    ############# todo: check following values
     action_scale = 7.5
     dof_velocity_scale = 0.1
 
@@ -179,6 +183,7 @@ class FrankaCabinetEnvCfg(DirectRLEnvCfg):
     open_reward_scale = 10.0
     action_penalty_scale = 0.05
     finger_reward_scale = 2.0
+    ############### till here
 
 
 class FrankaCabinetEnv(DirectRLEnv):
@@ -191,9 +196,9 @@ class FrankaCabinetEnv(DirectRLEnv):
     #   |-- _reset_idx(env_ids)
     #   |-- _get_observations()
 
-    cfg: FrankaCabinetEnvCfg
+    cfg: VireroSia20fEnvCfg
 
-    def __init__(self, cfg: FrankaCabinetEnvCfg, render_mode: str | None = None, **kwargs):
+    def __init__(self, cfg: VireroSia20fEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
 
         def get_env_local_pose(env_pos: torch.Tensor, xformable: UsdGeom.Xformable, device: torch.device):
