@@ -1,21 +1,22 @@
 from __future__ import annotations
 
 import torch
+from typing import Union
 
 from omni.isaac.core.utils.stage import get_current_stage
 from omni.isaac.core.utils.torch.transformations import tf_combine, tf_inverse, tf_vector
 from pxr import UsdGeom
 
-import isaaclab.sim as sim_utils
-from isaaclab.actuators.actuator_cfg import ImplicitActuatorCfg
-from isaaclab.assets import Articulation, ArticulationCfg
-from isaaclab.envs import DirectRLEnv, DirectRLEnvCfg
-from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sim import SimulationCfg
-from isaaclab.terrains import TerrainImporterCfg
-from isaaclab.utils import configclass
-from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
-from isaaclab.utils.math import sample_uniform
+import omni.isaac.lab.sim as sim_utils
+from omni.isaac.lab.actuators.actuator_cfg import ImplicitActuatorCfg
+from omni.isaac.lab.assets import Articulation, ArticulationCfg, RigidObject, RigidObjectCfg
+from omni.isaac.lab.envs import DirectRLEnv, DirectRLEnvCfg
+from omni.isaac.lab.scene import InteractiveSceneCfg
+from omni.isaac.lab.sim import SimulationCfg
+from omni.isaac.lab.terrains import TerrainImporterCfg
+from omni.isaac.lab.utils import configclass
+from omni.isaac.lab.utils.assets import ISAAC_NUCLEUS_DIR
+from omni.isaac.lab.utils.math import sample_uniform
 
 @configclass
 class VireroSia20fEnvCfg(DirectRLEnvCfg):
@@ -151,6 +152,25 @@ class VireroSia20fEnvCfg(DirectRLEnvCfg):
             # ),
         },
     )
+    
+
+    # Set each stacking cube deterministically
+    cube = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Cube_1",
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(0.4, 0.0, 0.0203), rot=(1, 0, 0, 0)),
+        spawn=sim_utils.UsdFileCfg(
+            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/blue_block.usd",
+            scale=(1.0, 1.0, 1.0),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                solver_position_iteration_count=16,
+                solver_velocity_iteration_count=1,
+                max_angular_velocity=1000.0,
+                max_linear_velocity=1000.0,
+                max_depenetration_velocity=5.0,
+                disable_gravity=False,
+            ),
+        ),
+    )
 
     # todo: check ground plane values later
     # ground plane
@@ -195,7 +215,7 @@ class VireroSia20fEnv(DirectRLEnv):
     def __init__(self, cfg: VireroSia20fEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
 
-        def get_env_local_pose(env_pos: torch.Tensor, xformable: UsdGeom.Xformable, device: torch.device):
+        def get_env_local_pose(env_pos: torch.Tensor, xformable: UsdGeom.Xformable, device: Union[str, torch.device, int]):
             """Compute pose in env-local coordinates"""
             world_transform = xformable.ComputeLocalToWorldTransform(0)
             world_pos = world_transform.ExtractTranslation()
@@ -214,8 +234,8 @@ class VireroSia20fEnv(DirectRLEnv):
         self.dt = self.cfg.sim.dt * self.cfg.decimation
 
         # create auxiliary variables for computing applied action, observations and rewards
-        self.robot_dof_lower_limits = self._robot.data.soft_joint_pos_limits[0, :, 0].to(device=self.device)
-        self.robot_dof_upper_limits = self._robot.data.soft_joint_pos_limits[0, :, 1].to(device=self.device)
+        self.robot_dof_lower_limits = self._sia20f.data.soft_joint_pos_limits[0, :, 0].to(device=self.device)
+        self.robot_dof_upper_limits = self._sia20f.data.soft_joint_pos_limits[0, :, 1].to(device=self.device)
 
         # todo: adjust the speed limits later
         self.robot_dof_speed_scales = torch.ones_like(self.robot_dof_lower_limits)
@@ -224,7 +244,7 @@ class VireroSia20fEnv(DirectRLEnv):
         # self.robot_dof_speed_scales[self._robot.find_joints("panda_finger_joint1")[0]] = 0.1
         # self.robot_dof_speed_scales[self._robot.find_joints("panda_finger_joint2")[0]] = 0.1
 
-        self.robot_dof_targets = torch.zeros((self.num_envs, self._robot.num_joints), device=self.device)
+        self.robot_dof_targets = torch.zeros((self.num_envs, self._sia20f.num_joints), device=self.device)
 
         stage = get_current_stage()
         hand_pose = get_env_local_pose(
@@ -250,45 +270,52 @@ class VireroSia20fEnv(DirectRLEnv):
         # finger_pose[3:7] = lfinger_pose[3:7]
         hand_pose_inv_rot, hand_pose_inv_pos = tf_inverse(hand_pose[3:7], hand_pose[0:3])
 
-        robot_local_grasp_pose_rot, robot_local_pose_pos = tf_combine(
-            hand_pose_inv_rot, hand_pose_inv_pos, finger_pose[3:7], finger_pose[0:3]
-        )
-        robot_local_pose_pos += torch.tensor([0, 0.04, 0], device=self.device)
-        self.robot_local_grasp_pos = robot_local_pose_pos.repeat((self.num_envs, 1))
-        self.robot_local_grasp_rot = robot_local_grasp_pose_rot.repeat((self.num_envs, 1))
+        # todo: later change the below command
+        # robot_local_grasp_pose_rot, robot_local_pose_pos = tf_combine(
+        #     hand_pose_inv_rot, hand_pose_inv_pos, finger_pose[3:7], finger_pose[0:3]
+        # )
 
-        drawer_local_grasp_pose = torch.tensor([0.3, 0.01, 0.0, 1.0, 0.0, 0.0, 0.0], device=self.device)
-        self.drawer_local_grasp_pos = drawer_local_grasp_pose[0:3].repeat((self.num_envs, 1))
-        self.drawer_local_grasp_rot = drawer_local_grasp_pose[3:7].repeat((self.num_envs, 1))
+        # done: modified the below 3 commands from  robot_local_pose_pos & robot_local_grasp_pose_rot to hand_pose_inv_pos & hand_pose_inv_rot
+        hand_pose_inv_pos += torch.tensor([0, 0.04, 0], device=self.device)
+        self.robot_local_grasp_pos = hand_pose_inv_pos.repeat((self.num_envs, 1))  #### todo: repeat does not seem to be recogniseing it as a tensor??? check later
+        self.robot_local_grasp_rot = hand_pose_inv_rot.repeat((self.num_envs, 1))
 
-        self.gripper_forward_axis = torch.tensor([0, 0, 1], device=self.device, dtype=torch.float32).repeat(
-            (self.num_envs, 1)
-        )
-        self.drawer_inward_axis = torch.tensor([-1, 0, 0], device=self.device, dtype=torch.float32).repeat(
-            (self.num_envs, 1)
-        )
-        self.gripper_up_axis = torch.tensor([0, 1, 0], device=self.device, dtype=torch.float32).repeat(
-            (self.num_envs, 1)
-        )
-        self.drawer_up_axis = torch.tensor([0, 0, 1], device=self.device, dtype=torch.float32).repeat(
-            (self.num_envs, 1)
-        )
+        # todo: later after adding the robotiq gripper
+        # drawer_local_grasp_pose = torch.tensor([0.3, 0.01, 0.0, 1.0, 0.0, 0.0, 0.0], device=self.device)
+        # self.drawer_local_grasp_pos = drawer_local_grasp_pose[0:3].repeat((self.num_envs, 1))
+        # self.drawer_local_grasp_rot = drawer_local_grasp_pose[3:7].repeat((self.num_envs, 1))
 
-        self.hand_link_idx = self._robot.find_bodies("panda_link7")[0][0]
-        self.left_finger_link_idx = self._robot.find_bodies("panda_leftfinger")[0][0]
-        self.right_finger_link_idx = self._robot.find_bodies("panda_rightfinger")[0][0]
-        self.drawer_link_idx = self._cabinet.find_bodies("drawer_top")[0][0]
+        # self.gripper_forward_axis = torch.tensor([0, 0, 1], device=self.device, dtype=torch.float32).repeat(
+        #     (self.num_envs, 1)
+        # )
+        # self.drawer_inward_axis = torch.tensor([-1, 0, 0], device=self.device, dtype=torch.float32).repeat(
+        #     (self.num_envs, 1)
+        # )
+        # self.gripper_up_axis = torch.tensor([0, 1, 0], device=self.device, dtype=torch.float32).repeat(
+        #     (self.num_envs, 1)
+        # )
+        # self.drawer_up_axis = torch.tensor([0, 0, 1], device=self.device, dtype=torch.float32).repeat(
+        #     (self.num_envs, 1)
+        # )
+
+        self.hand_link_idx = self._sia20f.find_bodies("sia20f_joint_7_t")[0][0]
+        # todo: later after adding the robotiq gripper
+        # self.left_finger_link_idx = self._robot.find_bodies("panda_leftfinger")[0][0]
+        # self.right_finger_link_idx = self._robot.find_bodies("panda_rightfinger")[0][0]
+        # self.drawer_link_idx = self._cabinet.find_bodies("drawer_top")[0][0]
 
         self.robot_grasp_rot = torch.zeros((self.num_envs, 4), device=self.device)
         self.robot_grasp_pos = torch.zeros((self.num_envs, 3), device=self.device)
-        self.drawer_grasp_rot = torch.zeros((self.num_envs, 4), device=self.device)
-        self.drawer_grasp_pos = torch.zeros((self.num_envs, 3), device=self.device)
+        # self.drawer_grasp_rot = torch.zeros((self.num_envs, 4), device=self.device)
+        # self.drawer_grasp_pos = torch.zeros((self.num_envs, 3), device=self.device)
 
     def _setup_scene(self):
-        self._robot = Articulation(self.cfg.robot)
-        self._cabinet = Articulation(self.cfg.virero)
-        self.scene.articulations["robot"] = self._robot
-        self.scene.articulations["cabinet"] = self._cabinet
+        self._sia20f = Articulation(self.cfg.sia20f)
+        self._virero = Articulation(self.cfg.virero)
+        self._cube = RigidObject(self.cfg.cube)
+        self.scene.articulations["sia20f"] = self._sia20f
+        self.scene.articulations["virero"] = self._virero
+        self.scene.rigid_objects["cube"] = self._cube
 
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
         self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
@@ -298,7 +325,7 @@ class VireroSia20fEnv(DirectRLEnv):
         self.scene.clone_environments(copy_from_source=False)
         self.scene.filter_collisions(global_prim_paths=[self.cfg.terrain.prim_path])
 
-        # add lights
+        # todo: later check ... add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
 
@@ -310,12 +337,14 @@ class VireroSia20fEnv(DirectRLEnv):
         self.robot_dof_targets[:] = torch.clamp(targets, self.robot_dof_lower_limits, self.robot_dof_upper_limits)
 
     def _apply_action(self):
-        self._robot.set_joint_position_target(self.robot_dof_targets)
+        self._sia20f.set_joint_position_target(self.robot_dof_targets)
 
     # post-physics step calls
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
-        terminated = self._cabinet.data.joint_pos[:, 3] > 0.39
+        # terminated = self._cabinet.data.joint_pos[:, 3] > 0.39
+        # todo: check termination condition
+        terminated = self._sia20f.data.joint_pos[:] > self.robot_dof_upper_limits[0] - 0.01
         truncated = self.episode_length_buf >= self.max_episode_length - 1
         return terminated, truncated
 
@@ -393,12 +422,12 @@ class VireroSia20fEnv(DirectRLEnv):
 
     def _compute_intermediate_values(self, env_ids: torch.Tensor | None = None):
         if env_ids is None:
-            env_ids = self._robot._ALL_INDICES
+            env_ids = self._sia20f._ALL_INDICES
 
-        hand_pos = self._robot.data.body_link_pos_w[env_ids, self.hand_link_idx]
-        hand_rot = self._robot.data.body_link_quat_w[env_ids, self.hand_link_idx]
-        drawer_pos = self._cabinet.data.body_link_pos_w[env_ids, self.drawer_link_idx]
-        drawer_rot = self._cabinet.data.body_link_quat_w[env_ids, self.drawer_link_idx]
+        hand_pos = self._sia20f.data.body_link_pos_w[env_ids, self.hand_link_idx]
+        hand_rot = self._sia20f.data.body_link_quat_w[env_ids, self.hand_link_idx]
+        # drawer_pos = self._cabinet.data.body_link_pos_w[env_ids, self.drawer_link_idx]
+        # drawer_rot = self._cabinet.data.body_link_quat_w[env_ids, self.drawer_link_idx]
         (
             self.robot_grasp_rot[env_ids],
             self.robot_grasp_pos[env_ids],
