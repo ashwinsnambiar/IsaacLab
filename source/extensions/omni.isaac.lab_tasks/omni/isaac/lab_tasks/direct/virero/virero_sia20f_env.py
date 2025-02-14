@@ -234,11 +234,11 @@ class VireroSia20fEnv(DirectRLEnv):
         self.dt = self.cfg.sim.dt * self.cfg.decimation
 
         # create auxiliary variables for computing applied action, observations and rewards
-        self.robot_dof_lower_limits = self._sia20f.data.soft_joint_pos_limits[0, :, 0].to(device=self.device)
-        self.robot_dof_upper_limits = self._sia20f.data.soft_joint_pos_limits[0, :, 1].to(device=self.device)
+        self.sia20f_dof_lower_limits = self._sia20f.data.soft_joint_pos_limits[0, :, 0].to(device=self.device)
+        self.sia20f_dof_upper_limits = self._sia20f.data.soft_joint_pos_limits[0, :, 1].to(device=self.device)
 
         # todo: adjust the speed limits later
-        self.robot_dof_speed_scales = torch.ones_like(self.robot_dof_lower_limits)
+        self.robot_dof_speed_scales = torch.ones_like(self.sia20f_dof_lower_limits)
         
         # todo: add robotiq fingers
         # self.robot_dof_speed_scales[self._robot.find_joints("panda_finger_joint1")[0]] = 0.1
@@ -334,7 +334,7 @@ class VireroSia20fEnv(DirectRLEnv):
     def _pre_physics_step(self, actions: torch.Tensor):
         self.actions = actions.clone().clamp(-1.0, 1.0)
         targets = self.robot_dof_targets + self.robot_dof_speed_scales * self.dt * self.actions * self.cfg.action_scale
-        self.robot_dof_targets[:] = torch.clamp(targets, self.robot_dof_lower_limits, self.robot_dof_upper_limits)
+        self.robot_dof_targets[:] = torch.clamp(targets, self.sia20f_dof_lower_limits, self.sia20f_dof_upper_limits)
 
     def _apply_action(self):
         self._sia20f.set_joint_position_target(self.robot_dof_targets)
@@ -344,37 +344,39 @@ class VireroSia20fEnv(DirectRLEnv):
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         # terminated = self._cabinet.data.joint_pos[:, 3] > 0.39
         # todo: check termination condition
-        terminated = self._sia20f.data.joint_pos[:] > self.robot_dof_upper_limits[0] - 0.01
+        terminated = self._sia20f.data.joint_pos[:] > self.sia20f_dof_upper_limits[0] - 0.01
         truncated = self.episode_length_buf >= self.max_episode_length - 1
         return terminated, truncated
 
     def _get_rewards(self) -> torch.Tensor:
         # Refresh the intermediate values after the physics steps
         self._compute_intermediate_values()
-        robot_left_finger_pos = self._robot.data.body_link_pos_w[:, self.left_finger_link_idx]
-        robot_right_finger_pos = self._robot.data.body_link_pos_w[:, self.right_finger_link_idx]
+        # todo: later after adding the robotiq gripper
+        # robot_left_finger_pos = self._robot.data.body_link_pos_w[:, self.left_finger_link_idx]
+        # robot_right_finger_pos = self._robot.data.body_link_pos_w[:, self.right_finger_link_idx]
 
-        return self._compute_rewards(
-            self.actions,
-            self._cabinet.data.joint_pos,
-            self.robot_grasp_pos,
-            self.drawer_grasp_pos,
-            self.robot_grasp_rot,
-            self.drawer_grasp_rot,
-            robot_left_finger_pos,
-            robot_right_finger_pos,
-            self.gripper_forward_axis,
-            self.drawer_inward_axis,
-            self.gripper_up_axis,
-            self.drawer_up_axis,
-            self.num_envs,
-            self.cfg.dist_reward_scale,
-            self.cfg.rot_reward_scale,
-            self.cfg.open_reward_scale,
-            self.cfg.action_penalty_scale,
-            self.cfg.finger_reward_scale,
-            self._robot.data.joint_pos,
-        )
+        # return self._compute_rewards(
+        #     self.actions,
+        #     self._cabinet.data.joint_pos,
+        #     self.robot_grasp_pos,
+        #     self.drawer_grasp_pos,
+        #     self.robot_grasp_rot,
+        #     self.drawer_grasp_rot,
+        #     robot_left_finger_pos,
+        #     robot_right_finger_pos,
+        #     self.gripper_forward_axis,
+        #     self.drawer_inward_axis,
+        #     self.gripper_up_axis,
+        #     self.drawer_up_axis,
+        #     self.num_envs,
+        #     self.cfg.dist_reward_scale,
+        #     self.cfg.rot_reward_scale,
+        #     self.cfg.open_reward_scale,
+        #     self.cfg.action_penalty_scale,
+        #     self.cfg.finger_reward_scale,
+        #     self._robot.data.joint_pos,
+        # )
+        return self._compute_rewards()
 
     def _reset_idx(self, env_ids: torch.Tensor | None):
         super()._reset_idx(env_ids)
@@ -385,7 +387,7 @@ class VireroSia20fEnv(DirectRLEnv):
             (len(env_ids), self._robot.num_joints),
             self.device,
         )
-        joint_pos = torch.clamp(joint_pos, self.robot_dof_lower_limits, self.robot_dof_upper_limits)
+        joint_pos = torch.clamp(joint_pos, self.sia20f_dof_lower_limits, self.sia20f_dof_upper_limits)
         joint_vel = torch.zeros_like(joint_pos)
         self._robot.set_joint_position_target(joint_pos, env_ids=env_ids)
         self._robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
@@ -398,10 +400,11 @@ class VireroSia20fEnv(DirectRLEnv):
         self._compute_intermediate_values(env_ids)
 
     def _get_observations(self) -> dict:
+        # todo: check why this scaled pos... seems to be normalised, but why 2.0 and -1.0
         dof_pos_scaled = (
             2.0
-            * (self._robot.data.joint_pos - self.robot_dof_lower_limits)
-            / (self.robot_dof_upper_limits - self.robot_dof_lower_limits)
+            * (self._robot.data.joint_pos - self.sia20f_dof_lower_limits)
+            / (self.sia20f_dof_upper_limits - self.sia20f_dof_lower_limits)
             - 1.0
         )
         to_target = self.drawer_grasp_pos - self.robot_grasp_pos
@@ -444,85 +447,103 @@ class VireroSia20fEnv(DirectRLEnv):
             self.drawer_local_grasp_pos[env_ids],
         )
 
-    def _compute_rewards(
-        self,
-        actions,
-        cabinet_dof_pos,
-        franka_grasp_pos,
-        drawer_grasp_pos,
-        franka_grasp_rot,
-        drawer_grasp_rot,
-        franka_lfinger_pos,
-        franka_rfinger_pos,
-        gripper_forward_axis,
-        drawer_inward_axis,
-        gripper_up_axis,
-        drawer_up_axis,
-        num_envs,
-        dist_reward_scale,
-        rot_reward_scale,
-        open_reward_scale,
-        action_penalty_scale,
-        finger_reward_scale,
-        joint_positions,
-    ):
+    def _compute_rewards(self) -> torch.Tensor:
         # distance from hand to the drawer
-        d = torch.norm(franka_grasp_pos - drawer_grasp_pos, p=2, dim=-1)
-        dist_reward = 1.0 / (1.0 + d**2)
+        d = torch.linalg.matrix_norm(self.robot_grasp_pos - self.drawer_grasp_pos, p=2, dim=-1)
+        dist_reward = 1.0 / (1.0 + d ** 2)
         dist_reward *= dist_reward
         dist_reward = torch.where(d <= 0.02, dist_reward * 2, dist_reward)
 
-        axis1 = tf_vector(franka_grasp_rot, gripper_forward_axis)
-        axis2 = tf_vector(drawer_grasp_rot, drawer_inward_axis)
-        axis3 = tf_vector(franka_grasp_rot, gripper_up_axis)
-        axis4 = tf_vector(drawer_grasp_rot, drawer_up_axis)
-
-        dot1 = (
-            torch.bmm(axis1.view(num_envs, 1, 3), axis2.view(num_envs, 3, 1)).squeeze(-1).squeeze(-1)
-        )  # alignment of forward axis for gripper
-        dot2 = (
-            torch.bmm(axis3.view(num_envs, 1, 3), axis4.view(num_envs, 3, 1)).squeeze(-1).squeeze(-1)
-        )  # alignment of up axis for gripper
         # reward for matching the orientation of the hand to the drawer (fingers wrapped)
-        rot_reward = 0.5 * (torch.sign(dot1) * dot1**2 + torch.sign(dot2) * dot2**2)
+        rot_reward = 0.5 * (torch.sign(dot1) * dot1 ** 2 + torch.sign(dot2) * dot2 ** 2)
 
         # regularization on the actions (summed for each environment)
-        action_penalty = torch.sum(actions**2, dim=-1)
+        action_penalty = torch.sum(self.actions ** 2, dim=-1)
 
         # how far the cabinet has been opened out
-        open_reward = cabinet_dof_pos[:, 3]  # drawer_top_joint
-
-        # penalty for distance of each finger from the drawer handle
-        lfinger_dist = franka_lfinger_pos[:, 2] - drawer_grasp_pos[:, 2]
-        rfinger_dist = drawer_grasp_pos[:, 2] - franka_rfinger_pos[:, 2]
-        finger_dist_penalty = torch.zeros_like(lfinger_dist)
-        finger_dist_penalty += torch.where(lfinger_dist < 0, lfinger_dist, torch.zeros_like(lfinger_dist))
-        finger_dist_penalty += torch.where(rfinger_dist < 0, rfinger_dist, torch.zeros_like(rfinger_dist))
-
-        rewards = (
-            dist_reward_scale * dist_reward
-            + rot_reward_scale * rot_reward
-            + open_reward_scale * open_reward
-            + finger_reward_scale * finger_dist_penalty
-            - action_penalty_scale * action_penalty
-        )
-
-        self.extras["log"] = {
-            "dist_reward": (dist_reward_scale * dist_reward).mean(),
-            "rot_reward": (rot_reward_scale * rot_reward).mean(),
-            "open_reward": (open_reward_scale * open_reward).mean(),
-            "action_penalty": (-action_penalty_scale * action_penalty).mean(),
-            "left_finger_distance_reward": (finger_reward_scale * lfinger_dist).mean(),
-            "right_finger_distance_reward": (finger_reward_scale * rfinger_dist).mean(),
-            "finger_dist_penalty": (finger_reward_scale * finger_dist_penalty).mean(),
-        }
-
-        # bonus for opening drawer properly
-        rewards = torch.where(cabinet_dof_pos[:, 3] > 0.01, rewards + 0.25, rewards)
-        rewards = torch.where(cabinet_dof_pos[:, 3] > 0.2, rewards + 0.25, rewards)
-        rewards = torch.where(cabinet_dof_pos[:, 3] > 0.35, rewards + 0.25, rewards)
-
+        open_reward = self._cabinet.data.joint_pos[:, 3]
+        
         return rewards
+    
+    # def _compute_rewards(
+    #     self,
+    #     actions,
+    #     cabinet_dof_pos,
+    #     franka_grasp_pos,
+    #     drawer_grasp_pos,
+    #     franka_grasp_rot,
+    #     drawer_grasp_rot,
+    #     franka_lfinger_pos,
+    #     franka_rfinger_pos,
+    #     gripper_forward_axis,
+    #     drawer_inward_axis,
+    #     gripper_up_axis,
+    #     drawer_up_axis,
+    #     num_envs,
+    #     dist_reward_scale,
+    #     rot_reward_scale,
+    #     open_reward_scale,
+    #     action_penalty_scale,
+    #     finger_reward_scale,
+    #     joint_positions,
+    # ):
+    #     # distance from hand to the drawer
+    #     d = torch.norm(franka_grasp_pos - drawer_grasp_pos, p=2, dim=-1)
+    #     dist_reward = 1.0 / (1.0 + d**2)
+    #     dist_reward *= dist_reward
+    #     dist_reward = torch.where(d <= 0.02, dist_reward * 2, dist_reward)
+
+    #     axis1 = tf_vector(franka_grasp_rot, gripper_forward_axis)
+    #     axis2 = tf_vector(drawer_grasp_rot, drawer_inward_axis)
+    #     axis3 = tf_vector(franka_grasp_rot, gripper_up_axis)
+    #     axis4 = tf_vector(drawer_grasp_rot, drawer_up_axis)
+
+    #     dot1 = (
+    #         torch.bmm(axis1.view(num_envs, 1, 3), axis2.view(num_envs, 3, 1)).squeeze(-1).squeeze(-1)
+    #     )  # alignment of forward axis for gripper
+    #     dot2 = (
+    #         torch.bmm(axis3.view(num_envs, 1, 3), axis4.view(num_envs, 3, 1)).squeeze(-1).squeeze(-1)
+    #     )  # alignment of up axis for gripper
+    #     # reward for matching the orientation of the hand to the drawer (fingers wrapped)
+    #     rot_reward = 0.5 * (torch.sign(dot1) * dot1**2 + torch.sign(dot2) * dot2**2)
+
+    #     # regularization on the actions (summed for each environment)
+    #     action_penalty = torch.sum(actions**2, dim=-1)
+
+    #     # how far the cabinet has been opened out
+    #     open_reward = cabinet_dof_pos[:, 3]  # drawer_top_joint
+
+    #     # penalty for distance of each finger from the drawer handle
+    #     lfinger_dist = franka_lfinger_pos[:, 2] - drawer_grasp_pos[:, 2]
+    #     rfinger_dist = drawer_grasp_pos[:, 2] - franka_rfinger_pos[:, 2]
+    #     finger_dist_penalty = torch.zeros_like(lfinger_dist)
+    #     finger_dist_penalty += torch.where(lfinger_dist < 0, lfinger_dist, torch.zeros_like(lfinger_dist))
+    #     finger_dist_penalty += torch.where(rfinger_dist < 0, rfinger_dist, torch.zeros_like(rfinger_dist))
+
+    #     rewards = (
+    #         dist_reward_scale * dist_reward
+    #         + rot_reward_scale * rot_reward
+    #         + open_reward_scale * open_reward
+    #         + finger_reward_scale * finger_dist_penalty
+    #         - action_penalty_scale * action_penalty
+    #     )
+
+    #     self.extras["log"] = {
+    #         "dist_reward": (dist_reward_scale * dist_reward).mean(),
+    #         "rot_reward": (rot_reward_scale * rot_reward).mean(),
+    #         "open_reward": (open_reward_scale * open_reward).mean(),
+    #         "action_penalty": (-action_penalty_scale * action_penalty).mean(),
+    #         "left_finger_distance_reward": (finger_reward_scale * lfinger_dist).mean(),
+    #         "right_finger_distance_reward": (finger_reward_scale * rfinger_dist).mean(),
+    #         "finger_dist_penalty": (finger_reward_scale * finger_dist_penalty).mean(),
+    #     }
+
+    #     # bonus for opening drawer properly
+    #     rewards = torch.where(cabinet_dof_pos[:, 3] > 0.01, rewards + 0.25, rewards)
+    #     rewards = torch.where(cabinet_dof_pos[:, 3] > 0.2, rewards + 0.25, rewards)
+    #     rewards = torch.where(cabinet_dof_pos[:, 3] > 0.35, rewards + 0.25, rewards)
+
+    #     return rewards
 
     def _compute_grasp_transforms(
         self,
