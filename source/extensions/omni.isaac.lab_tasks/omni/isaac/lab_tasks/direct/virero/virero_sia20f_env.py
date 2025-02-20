@@ -264,6 +264,17 @@ class VireroSia20fEnv(DirectRLEnv):
         #     self.device,
         # )
 
+        # edit: added cube local pose
+        cube_local_pose = get_env_local_pose(
+            self.scene.env_origins[0],
+            UsdGeom.Xformable(stage.GetPrimAtPath("/World/envs/env_0/Cube_1")),
+            self.device,
+        )
+        
+        cube_local_inv_rot, cube_local_inv_pos = tf_inverse(cube_local_pose[3:7], cube_local_pose[0:3])
+        self.cube_local_pos = cube_local_inv_pos.repeat((self.num_envs, 1))
+        self.cube_local_rot = cube_local_inv_rot.repeat((self.num_envs, 1))
+    
         # todo: later after adding the robotiq gripper
         # finger_pose = torch.zeros(7, device=self.device)
         # finger_pose[0:3] = (lfinger_pose[0:3] + rfinger_pose[0:3]) / 2.0
@@ -279,7 +290,7 @@ class VireroSia20fEnv(DirectRLEnv):
         hand_pose_inv_pos += torch.tensor([0, 0.04, 0], device=self.device)
         self.robot_local_grasp_pos = hand_pose_inv_pos.repeat((self.num_envs, 1))  #### todo: repeat does not seem to be recogniseing it as a tensor??? check later
         self.robot_local_grasp_rot = hand_pose_inv_rot.repeat((self.num_envs, 1))
-
+        
         # todo: later after adding the robotiq gripper
         # drawer_local_grasp_pose = torch.tensor([0.3, 0.01, 0.0, 1.0, 0.0, 0.0, 0.0], device=self.device)
         # self.drawer_local_grasp_pos = drawer_local_grasp_pose[0:3].repeat((self.num_envs, 1))
@@ -308,6 +319,10 @@ class VireroSia20fEnv(DirectRLEnv):
         self.robot_grasp_pos = torch.zeros((self.num_envs, 3), device=self.device)
         # self.drawer_grasp_rot = torch.zeros((self.num_envs, 4), device=self.device)
         # self.drawer_grasp_pos = torch.zeros((self.num_envs, 3), device=self.device)
+        
+        # edit: added cube position and rotation
+        self.cube_pos = torch.tensor((self.num_envs, 3), device=self.device)
+        self.cube_rot = torch.tensor((self.num_envs, 4), device=self.device)
 
     def _setup_scene(self):
         self._sia20f = Articulation(self.cfg.sia20f)
@@ -381,21 +396,28 @@ class VireroSia20fEnv(DirectRLEnv):
     def _reset_idx(self, env_ids: torch.Tensor | None):
         super()._reset_idx(env_ids)
         # robot state
-        joint_pos = self._robot.data.default_joint_pos[env_ids] + sample_uniform(
+        joint_pos = self._sia20f.data.default_joint_pos[env_ids] + sample_uniform(
             -0.125,
             0.125,
-            (len(env_ids), self._robot.num_joints),
+            (len(env_ids), self._sia20f.num_joints),
             self.device,
         )
         joint_pos = torch.clamp(joint_pos, self.sia20f_dof_lower_limits, self.sia20f_dof_upper_limits)
         joint_vel = torch.zeros_like(joint_pos)
-        self._robot.set_joint_position_target(joint_pos, env_ids=env_ids)
-        self._robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
+        self._sia20f.set_joint_position_target(joint_pos, env_ids=env_ids)
+        self._sia20f.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
 
-        # cabinet state
-        zeros = torch.zeros((len(env_ids), self._cabinet.num_joints), device=self.device)
-        self._cabinet.write_joint_state_to_sim(zeros, zeros, env_ids=env_ids)
+        # # cabinet state
+        # zeros = torch.zeros((len(env_ids), self._cabinet.num_joints), device=self.device)
+        # self._cabinet.write_joint_state_to_sim(zeros, zeros, env_ids=env_ids)
+        
+        # cube state
+        cube_pos = torch.tensor([0.4, 0.0, 0.0203], device=self.device).repeat((len(env_ids), 1))
+        cube_rot = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).repeat((len(env_ids), 1))
+        # todo: check the correct command for setting the state
+        self._cube.set_state(cube_pos, cube_rot, env_ids=env_ids)
 
+        
         # Need to refresh the intermediate values so that _get_observations() can use the latest values
         self._compute_intermediate_values(env_ids)
 
@@ -403,19 +425,20 @@ class VireroSia20fEnv(DirectRLEnv):
         # todo: check why this scaled pos... seems to be normalised, but why 2.0 and -1.0
         dof_pos_scaled = (
             2.0
-            * (self._robot.data.joint_pos - self.sia20f_dof_lower_limits)
+            * (self._sia20f.data.joint_pos - self.sia20f_dof_lower_limits)
             / (self.sia20f_dof_upper_limits - self.sia20f_dof_lower_limits)
             - 1.0
         )
-        to_target = self.drawer_grasp_pos - self.robot_grasp_pos
+        
+        to_target = self.cube_pos - self.robot_grasp_pos
 
         obs = torch.cat(
             (
                 dof_pos_scaled,
-                self._robot.data.joint_vel * self.cfg.dof_velocity_scale,
+                self._sia20f.data.joint_vel * self.cfg.dof_velocity_scale,
                 to_target,
-                self._cabinet.data.joint_pos[:, 3].unsqueeze(-1),
-                self._cabinet.data.joint_vel[:, 3].unsqueeze(-1),
+                # self._cabinet.data.joint_pos[:, 3].unsqueeze(-1),
+                # self._cabinet.data.joint_vel[:, 3].unsqueeze(-1),
             ),
             dim=-1,
         )
@@ -423,6 +446,7 @@ class VireroSia20fEnv(DirectRLEnv):
 
     # auxiliary methods
 
+    # edit: added the cube position and rotation calculation
     def _compute_intermediate_values(self, env_ids: torch.Tensor | None = None):
         if env_ids is None:
             env_ids = self._sia20f._ALL_INDICES
@@ -431,39 +455,40 @@ class VireroSia20fEnv(DirectRLEnv):
         hand_rot = self._sia20f.data.body_link_quat_w[env_ids, self.hand_link_idx]
         # drawer_pos = self._cabinet.data.body_link_pos_w[env_ids, self.drawer_link_idx]
         # drawer_rot = self._cabinet.data.body_link_quat_w[env_ids, self.drawer_link_idx]
+        # edit: added cube position and rotation
+        cube_pos = self._cube.data.body_link_pos_w[env_ids, 0]
+        cube_rot = self._cube.data.body_link_quat_w[env_ids, 0]
+        
         (
             self.robot_grasp_rot[env_ids],
             self.robot_grasp_pos[env_ids],
-            self.drawer_grasp_rot[env_ids],
-            self.drawer_grasp_pos[env_ids],
+            self.cube_rot[env_ids],
+            self.cube_pos[env_ids],
         ) = self._compute_grasp_transforms(
             hand_rot,
             hand_pos,
             self.robot_local_grasp_rot[env_ids],
             self.robot_local_grasp_pos[env_ids],
-            drawer_rot,
-            drawer_pos,
-            self.drawer_local_grasp_rot[env_ids],
-            self.drawer_local_grasp_pos[env_ids],
+            cube_rot,
+            cube_pos,
+            self.cube_local_rot[env_ids],
+            self.cube_local_pos[env_ids],
         )
 
     def _compute_rewards(self) -> torch.Tensor:
         # distance from hand to the drawer
-        d = torch.linalg.matrix_norm(self.robot_grasp_pos - self.drawer_grasp_pos, p=2, dim=-1)
-        dist_reward = 1.0 / (1.0 + d ** 2)
-        dist_reward *= dist_reward
-        dist_reward = torch.where(d <= 0.02, dist_reward * 2, dist_reward)
+        d = torch.linalg.vector_norm(self.robot_grasp_pos - self.cube_pos, p=2, dim=-1)  # todo: verify if vector_norm is correct, change to matrix_norm?
+        scale = 200
+        sensitivity = 1
+        dist_reward = - (scale * torch.tanh(sensitivity * d))
 
-        # reward for matching the orientation of the hand to the drawer (fingers wrapped)
-        rot_reward = 0.5 * (torch.sign(dot1) * dot1 ** 2 + torch.sign(dot2) * dot2 ** 2)
+        # # regularization on the actions (summed for each environment)
+        # action_penalty = torch.sum(self.actions ** 2, dim=-1)
 
-        # regularization on the actions (summed for each environment)
-        action_penalty = torch.sum(self.actions ** 2, dim=-1)
-
-        # how far the cabinet has been opened out
-        open_reward = self._cabinet.data.joint_pos[:, 3]
+        # per step penalty
+        penalty_step = torch.full_like(dist_reward, (0.5 / 2000))
         
-        return rewards
+        return (dist_reward + penalty_step)
     
     # def _compute_rewards(
     #     self,
@@ -551,16 +576,16 @@ class VireroSia20fEnv(DirectRLEnv):
         hand_pos,
         franka_local_grasp_rot,
         franka_local_grasp_pos,
-        drawer_rot,
-        drawer_pos,
-        drawer_local_grasp_rot,
-        drawer_local_grasp_pos,
+        cube_rot,
+        cube_pos,
+        cube_local_grasp_rot,
+        cube_local_grasp_pos,
     ):
-        global_franka_rot, global_franka_pos = tf_combine(
+        global_robot_rot, global_robot_pos = tf_combine(
             hand_rot, hand_pos, franka_local_grasp_rot, franka_local_grasp_pos
         )
-        global_drawer_rot, global_drawer_pos = tf_combine(
-            drawer_rot, drawer_pos, drawer_local_grasp_rot, drawer_local_grasp_pos
+        global_cube_rot, global_cube_pos = tf_combine(
+            cube_rot, cube_pos, cube_local_grasp_rot, cube_local_grasp_pos
         )
 
-        return global_franka_rot, global_franka_pos, global_drawer_rot, global_drawer_pos
+        return global_robot_rot, global_robot_pos, global_cube_rot, global_cube_pos
