@@ -412,10 +412,9 @@ class VireroSia20fEnv(DirectRLEnv):
         # self._cabinet.write_joint_state_to_sim(zeros, zeros, env_ids=env_ids)
         
         # cube state
-        cube_pos = torch.tensor([0.4, 0.0, 0.0203], device=self.device).repeat((len(env_ids), 1))
-        cube_rot = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).repeat((len(env_ids), 1))
+        cube_pose = torch.tensor([0.4, 0.0, 0.0203, 1.0, 0.0, 0.0, 0.0], device=self.device).repeat((len(env_ids), 1))
         # todo: check the correct command for setting the state
-        self._cube.set_state(cube_pos, cube_rot, env_ids=env_ids)
+        self._cube.write_root_link_pose_to_sim(cube_pose, env_ids=env_ids)
 
         
         # Need to refresh the intermediate values so that _get_observations() can use the latest values
