@@ -9,7 +9,7 @@ from pxr import UsdGeom
 
 import omni.isaac.lab.sim as sim_utils
 from omni.isaac.lab.actuators.actuator_cfg import ImplicitActuatorCfg
-from omni.isaac.lab.assets import Articulation, ArticulationCfg, RigidObject, RigidObjectCfg
+from omni.isaac.lab.assets import Articulation, ArticulationCfg, RigidObject, RigidObjectCfg, RigidObjectCollection, RigidObjectCollectionCfg
 from omni.isaac.lab.envs import DirectRLEnv, DirectRLEnvCfg
 from omni.isaac.lab.scene import InteractiveSceneCfg
 from omni.isaac.lab.sim import SimulationCfg
@@ -47,61 +47,50 @@ class VireroSia20fEnvCfg(DirectRLEnvCfg):
 
     ######################################## till here
     
+    # virero_spawn_cfg=sim_utils.UsdFileCfg(
+    #                 usd_path=f"/home/faps_ubuntu22/virero/virero_usd_files/virero_urdf-usd/virero_with_sia20f_only_one_root.usd",
+    #             )
+    # virero_spawn_cfg.func("/World/envs/env_.*/virero", virero_spawn_cfg, translation=(0.0, 0.0, 0.0))
     # virero_env
     
     # todo: check if articulation cfg is correct?? since the root joint is not directly an articulation of the top parent.
     # todo later: try removing the articulation root from the root joint, it behaves well in the virero_ros file when added as reference.
-    virero = ArticulationCfg(
-        prim_path="/World/envs/env_.*/virero",
-        spawn=sim_utils.UsdFileCfg(
-            usd_path=f"/home/faps_ubuntu22/virero/virero_usd_files/virero_urdf-usd/
-                        versuchsanlage_with_sia20f.usd",
-        ),
-        # Defaults to identity pose with zero velocity and zero joint state. check again later
-        # init_state=ArticulationCfg.InitialStateCfg(
-        #     pos=(0.0, 0, 0.4),
-        #     rot=(0.1, 0.0, 0.0, 0.0),
-        #     joint_pos={
-        #         "door_left_joint": 0.0,
-        #         "door_right_joint": 0.0,
-        #         "drawer_bottom_joint": 0.0,
-        #         "drawer_top_joint": 0.0,
-        #     },
-        # ),
-        ####### todo: Check if actuators are really required?? if 
-        # actuators={
-        #     "drawers": ImplicitActuatorCfg(
-        #         joint_names_expr=["drawer_top_joint", "drawer_bottom_joint"],
-        #         effort_limit=87.0,
-        #         velocity_limit=100.0,
-        #         stiffness=10.0,
-        #         damping=1.0,
-        #     ),
-        #     "doors": ImplicitActuatorCfg(
-        #         joint_names_expr=["door_left_joint", "door_right_joint"],
-        #         effort_limit=87.0,
-        #         velocity_limit=100.0,
-        #         stiffness=10.0,
-        #         damping=2.5,
-        #     ),
-        #},
-    )    
+    # virero = RigidObjectCollectionCfg(
+    #     rigid_objects={
+    #         "virero": RigidObjectCfg(
+    #             prim_path="/World/envs/env_.*/virero",
+    #             spawn=virero_spawn,
+    #         # Defaults to identity pose with zero velocity and zero joint state. check again later
+    #         # init_state=ArticulationCfg.InitialStateCfg(
+    #         #     pos=(0.0, 0, 0.4),
+    #         #     rot=(0.1, 0.0, 0.0, 0.0),
+    #         #     joint_pos={
+    #         #         "door_left_joint": 0.0,
+    #         #         "door_right_joint": 0.0,
+    #         #         "drawer_bottom_joint": 0.0,
+    #         #         "drawer_top_joint": 0.0,
+    #         #     },
+    #         # ),
+    #         ),
+    #         # "sia20f": RigidObjectCfg(
+    #         # ),
+    #     },)   
     
     # sia20f : configuring it as an articulation, but already spawned beforehand in the virero setup.
     sia20f = ArticulationCfg(
-        prim_path="/World/envs/env_.*/virero/sia20f",
+        prim_path="/World/envs/env_.*/virero",
         # todo: check if it works without spawn
-        # spawn=sim_utils.UsdFileCfg(
-        #     usd_path=f"{ISAAC_NUCLEUS_DIR}/Robots/Franka/franka_instanceable.usd",
-        #     activate_contact_sensors=False,
-        #     rigid_props=sim_utils.RigidBodyPropertiesCfg(
-        #         disable_gravity=False,
-        #         max_depenetration_velocity=5.0,
-        #     ),
-        #     articulation_props=sim_utils.ArticulationRootPropertiesCfg(
-        #         enabled_self_collisions=False, solver_position_iteration_count=12, solver_velocity_iteration_count=1
-        #     ),
-        # ),
+        spawn=sim_utils.UsdFileCfg(
+            usd_path=f"/home/faps_ubuntu22/virero/virero_usd_files/virero_urdf-usd/virero_with_sia20f_only_one_root.usd",
+            # activate_contact_sensors=False,
+            # rigid_props=sim_utils.RigidBodyPropertiesCfg(
+            #     disable_gravity=False,
+            #     max_depenetration_velocity=5.0,
+            # ),
+            # articulation_props=sim_utils.ArticulationRootPropertiesCfg(
+            #     enabled_self_collisions=False, solver_position_iteration_count=12, solver_velocity_iteration_count=1
+            # ),
+        ),
         init_state=ArticulationCfg.InitialStateCfg(
             joint_pos={
                 "sia20f_linearachse_inner_joint": 0.0,
@@ -156,7 +145,7 @@ class VireroSia20fEnvCfg(DirectRLEnvCfg):
 
     # Set each stacking cube deterministically
     cube = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Cube_1",
+        prim_path="/World/envs/env_.*/Cube",
         init_state=RigidObjectCfg.InitialStateCfg(pos=(0.4, 0.0, 0.0203), rot=(1, 0, 0, 0)),
         spawn=sim_utils.UsdFileCfg(
             usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/blue_block.usd",
@@ -249,7 +238,7 @@ class VireroSia20fEnv(DirectRLEnv):
         stage = get_current_stage()
         hand_pose = get_env_local_pose(
             self.scene.env_origins[0],
-            UsdGeom.Xformable(stage.GetPrimAtPath("/World/envs/env_0/virero/sia20f/sia20f_joint_7_t")),
+            UsdGeom.Xformable(stage.GetPrimAtPath("/World/envs/env_0/virero/sia20f/sia20f_link_7_t")),
             self.device,
         )
         # todo: later after adding the robotiq gripper
@@ -263,11 +252,11 @@ class VireroSia20fEnv(DirectRLEnv):
         #     UsdGeom.Xformable(stage.GetPrimAtPath("/World/envs/env_0/Robot/panda_rightfinger")),
         #     self.device,
         # )
-
+        print("\n\n\n\nChildren ::: ", stage.GetPrimAtPath("/World/envs/env_0/virero/sia20f").GetAllChildrenNames())
         # edit: added cube local pose
         cube_local_pose = get_env_local_pose(
             self.scene.env_origins[0],
-            UsdGeom.Xformable(stage.GetPrimAtPath("/World/envs/env_0/Cube_1")),
+            UsdGeom.Xformable(stage.GetPrimAtPath("/World/envs/env_0/Cube")),
             self.device,
         )
         
@@ -309,7 +298,7 @@ class VireroSia20fEnv(DirectRLEnv):
         #     (self.num_envs, 1)
         # )
 
-        self.hand_link_idx = self._sia20f.find_bodies("sia20f_joint_7_t")[0][0]
+        self.hand_link_idx = self._sia20f.find_bodies("sia20f_link_7_t")[0][0]
         # todo: later after adding the robotiq gripper
         # self.left_finger_link_idx = self._robot.find_bodies("panda_leftfinger")[0][0]
         # self.right_finger_link_idx = self._robot.find_bodies("panda_rightfinger")[0][0]
@@ -321,15 +310,15 @@ class VireroSia20fEnv(DirectRLEnv):
         # self.drawer_grasp_pos = torch.zeros((self.num_envs, 3), device=self.device)
         
         # edit: added cube position and rotation
-        self.cube_pos = torch.tensor((self.num_envs, 3), device=self.device)
-        self.cube_rot = torch.tensor((self.num_envs, 4), device=self.device)
+        self.cube_pos = torch.zeros((self.num_envs, 3), device=self.device)
+        self.cube_rot = torch.zeros((self.num_envs, 4), device=self.device)
 
     def _setup_scene(self):
         self._sia20f = Articulation(self.cfg.sia20f)
-        self._virero = Articulation(self.cfg.virero)
+        # self._virero = RigidObjectCollection(self.cfg.virero)
         self._cube = RigidObject(self.cfg.cube)
         self.scene.articulations["sia20f"] = self._sia20f
-        self.scene.articulations["virero"] = self._virero
+        # self.scene.rigid_objects["virero"] = self._virero
         self.scene.rigid_objects["cube"] = self._cube
 
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
