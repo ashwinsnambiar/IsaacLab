@@ -25,7 +25,7 @@ class VireroSia20fEnvCfg(DirectRLEnvCfg):
     episode_length_s = 8.3333  # 500 timesteps
     decimation = 2
     action_space = 9
-    observation_space = 23
+    observation_space = 12
     state_space = 0
 
     # simulation
@@ -348,7 +348,8 @@ class VireroSia20fEnv(DirectRLEnv):
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         # terminated = self._cabinet.data.joint_pos[:, 3] > 0.39
         # todo: check termination condition
-        terminated = self._sia20f.data.joint_pos[:] > self.sia20f_dof_upper_limits[0] - 0.01
+        terminated = self._sia20f.data.joint_pos[:] > self.sia20f_dof_upper_limits[0]
+        terminated = terminated.any(dim=-1)
         truncated = self.episode_length_buf >= self.max_episode_length - 1
         return terminated, truncated
 
@@ -423,7 +424,7 @@ class VireroSia20fEnv(DirectRLEnv):
         obs = torch.cat(
             (
                 dof_pos_scaled,
-                self._sia20f.data.joint_vel * self.cfg.dof_velocity_scale,
+                # self._sia20f.data.joint_vel * self.cfg.dof_velocity_scale,
                 to_target,
                 # self._cabinet.data.joint_pos[:, 3].unsqueeze(-1),
                 # self._cabinet.data.joint_vel[:, 3].unsqueeze(-1),
@@ -465,7 +466,7 @@ class VireroSia20fEnv(DirectRLEnv):
 
     def _compute_rewards(self) -> torch.Tensor:
         # distance from hand to the drawer
-        d = torch.linalg.vector_norm(self.robot_grasp_pos - self.cube_pos, p=2, dim=-1)  # todo: verify if vector_norm is correct, change to matrix_norm?
+        d = torch.linalg.vector_norm(self.robot_grasp_pos - self.cube_pos, ord=2, dim=-1)  # todo: verify if vector_norm is correct, change to matrix_norm?
         scale = 200
         sensitivity = 1
         dist_reward = - (scale * torch.tanh(sensitivity * d))
