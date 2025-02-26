@@ -24,8 +24,8 @@ class VireroSia20fEnvCfg(DirectRLEnvCfg):
     # env
     episode_length_s = 8.3333  # 500 timesteps
     decimation = 2
-    action_space = 9
-    observation_space = 12
+    action_space = 7
+    observation_space = 10
     state_space = 0
 
     # simulation
@@ -81,7 +81,7 @@ class VireroSia20fEnvCfg(DirectRLEnvCfg):
         prim_path="/World/envs/env_.*/virero",
         # todo: check if it works without spawn
         spawn=sim_utils.UsdFileCfg(
-            usd_path=f"/home/faps_ubuntu22/virero/virero_usd_files/virero_urdf-usd/virero_with_sia20f_only_one_root.usd",
+            usd_path=f"/home/faps_ubuntu22/virero/virero_usd_files/virero_urdf-usd/virero_with_sia20f_only_one_root_robot_alone_wo_linear.usd",
             # activate_contact_sensors=False,
             # rigid_props=sim_utils.RigidBodyPropertiesCfg(
             #     disable_gravity=False,
@@ -93,8 +93,8 @@ class VireroSia20fEnvCfg(DirectRLEnvCfg):
         ),
         init_state=ArticulationCfg.InitialStateCfg(
             joint_pos={
-                "sia20f_linearachse_inner_joint": 0.0,
-                "sia20f_linearachse_middle_joint": 0.0,
+                # "sia20f_linearachse_inner_joint": 0.0,
+                # "sia20f_linearachse_middle_joint": 0.0,
                 "sia20f_joint_1_s": -0.363,
                 "sia20f_joint_2_l": 0.3159,
                 "sia20f_joint_3_e": 1.3491,
@@ -109,8 +109,8 @@ class VireroSia20fEnvCfg(DirectRLEnvCfg):
         actuators={
             "sia20f_all": ImplicitActuatorCfg(
                 joint_names_expr=[
-                    "sia20f_linearachse_inner_joint",
-                    "sia20f_linearachse_middle_joint",
+                    # "sia20f_linearachse_inner_joint",
+                    # "sia20f_linearachse_middle_joint",
                     "sia20f_joint_1_s",
                     "sia20f_joint_2_l",
                     "sia20f_joint_3_e",
@@ -142,14 +142,20 @@ class VireroSia20fEnvCfg(DirectRLEnvCfg):
         },
     )
     
+    # # todo: check if the following is needed ... (this was tried for older USD file with the sorting table.. but it worked with the following too)
+    # table = RigidObjectCfg(
+    #     prim_path="/World/envs/env_.*/virero/sorting_table_link",
+    #     init_state=RigidObjectCfg.InitialStateCfg(pos=(0.0, 0.0, 0.0), rot=(1, 0, 0, 0)),
+    # )
+    
 
-    # Set each stacking cube deterministically
+    # cube changed from the USD file to a separate rigid object..
+    # todo: cube spawning in correct location but the geometry immediatedly falls down... But the cube prim stays in the original initial position.
     cube = RigidObjectCfg(
         prim_path="/World/envs/env_.*/Cube",
-        init_state=RigidObjectCfg.InitialStateCfg(pos=(0.4, 0.0, 0.0203), rot=(1, 0, 0, 0)),
-        spawn=sim_utils.UsdFileCfg(
-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/blue_block.usd",
-            scale=(1.0, 1.0, 1.0),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(-0.8, 0.0, 1.1), rot=(1, 0, 0, 0)),
+        spawn=sim_utils.CuboidCfg(
+            size=(0.05, 0.05, 0.05),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 solver_position_iteration_count=16,
                 solver_velocity_iteration_count=1,
@@ -158,6 +164,9 @@ class VireroSia20fEnvCfg(DirectRLEnvCfg):
                 max_depenetration_velocity=5.0,
                 disable_gravity=False,
             ),
+            mass_props=sim_utils.MassPropertiesCfg(mass=1.0),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.0, 1.0)),
         ),
     )
 
@@ -203,6 +212,10 @@ class VireroSia20fEnv(DirectRLEnv):
 
     def __init__(self, cfg: VireroSia20fEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
+        
+        # todo: later to change the viewport 
+        # # Updating the viewport camera controller to parallel to the ground plane 
+        # self.viewport_camera_controller.update_view_location(eye=(9.0, 7.5, 1.5))
 
         def get_env_local_pose(env_pos: torch.Tensor, xformable: UsdGeom.Xformable, device: Union[str, torch.device, int]):
             """Compute pose in env-local coordinates"""
@@ -320,6 +333,9 @@ class VireroSia20fEnv(DirectRLEnv):
         self.scene.articulations["sia20f"] = self._sia20f
         # self.scene.rigid_objects["virero"] = self._virero
         self.scene.rigid_objects["cube"] = self._cube
+        
+        # todo: was trying this out to correct the cube spawning error.. but it did not work... this function not accessible or something
+        # self._cube.write_root_link_pose_to_sim(torch.tensor((-1.0, 0.0, 1.1, 1.0, 0.0, 0.0, 0.0)),[0])
 
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
         self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
@@ -341,6 +357,7 @@ class VireroSia20fEnv(DirectRLEnv):
         self.robot_dof_targets[:] = torch.clamp(targets, self.sia20f_dof_lower_limits, self.sia20f_dof_upper_limits)
 
     def _apply_action(self):
+        # sets the joint position target for the robot for all joints (joint ids can be specified to target specific joints)
         self._sia20f.set_joint_position_target(self.robot_dof_targets)
 
     # post-physics step calls
