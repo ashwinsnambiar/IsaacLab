@@ -71,21 +71,36 @@ def design_scene():
         visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 0.0)),
     )
     cfg_cone_rigid.func(
-        "/World/Objects/ConeRigid", cfg_cone_rigid, translation=(-0.2, 0.0, 2.0), orientation=(0.5, 0.0, 0.5, 0.0)
+        "/World/Objects/ConeRigid", cfg_cone_rigid, translation=(-0.8, 0.0, 2.0), orientation=(0.5, 0.0, 0.5, 0.0)
     )
 
-    # spawn a blue cuboid with deformable body
-    cfg_cuboid_deformable = sim_utils.MeshCuboidCfg(
-        size=(0.2, 0.5, 0.2),
-        deformable_props=sim_utils.DeformableBodyPropertiesCfg(),
-        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.0, 1.0)),
-        physics_material=sim_utils.DeformableBodyMaterialCfg(),
+    # spawn a blue cube
+    cfg_cube = sim_utils.CuboidCfg(
+        size=(0.05, 0.05, 0.05),
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(
+            solver_position_iteration_count=16,
+            solver_velocity_iteration_count=1,
+            max_angular_velocity=1000.0,
+            max_linear_velocity=1000.0,
+            max_depenetration_velocity=5.0,
+            disable_gravity=False,
+        ),
+        mass_props=sim_utils.MassPropertiesCfg(mass=1.0),
+        collision_props=sim_utils.CollisionPropertiesCfg(),
     )
-    cfg_cuboid_deformable.func("/World/Objects/CuboidDeformable", cfg_cuboid_deformable, translation=(0.15, 0.0, 2.0))
+    cfg_cube.func("/World/Objects/Cube", cfg_cube, translation=(-1.0, 0.0, 1.1))
 
     # spawn a usd file of a table into the scene
     virero_spawn_cfg=sim_utils.UsdFileCfg(
-                    usd_path=f"/home/faps_ubuntu22/virero/virero_usd_files/virero_urdf-usd/virero_with_sia20f_only.usd",
+                    usd_path=f"/home/faps_ubuntu22/virero/virero_usd_files/virero_urdf-usd/virero_with_sia20f_only_one_root.usd",
+                    # activate_contact_sensors=False,
+                    rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                        disable_gravity=False,
+                        max_depenetration_velocity=5.0,
+                    ),
+                    articulation_props=sim_utils.ArticulationRootPropertiesCfg(
+                        enabled_self_collisions=False, solver_position_iteration_count=12, solver_velocity_iteration_count=1
+                    ),
                 )
     virero_spawn_cfg.func("/World/virero", virero_spawn_cfg, translation=(0.0, 0.0, 0.0))
 
